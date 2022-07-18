@@ -13,10 +13,11 @@ import json
 import helpers
 
 class Product:
-    def __init__(self, name, price, url):
+    def __init__(self, name, price, url, availability):
         self.name = name
         self.price = price
         self.url = url
+        self.availability = availability
 
     def toJSON(self):
         return json.dumps(self, default=lambda o: o.__dict__, 
@@ -42,34 +43,39 @@ def check_products():
 def check_product(url):
 
     product = get_product_from_server(url)
-    product_json = product.toJSON()
     product_cache_name = url[-15:] if len(url) >= 15 else url
 
     if product_cache_name not in cache:
-        logger.info("New product found.", extra={'product': product_json})
-        notify(product, "New Entry !")
+        logger.info("New product found.", extra={'product': product.toJSON()})
+        notify(product, None)
     else:
-        old_price = cache[product_cache_name].price
+        old_product = cache[product_cache_name]
 
-        if product.price < old_price:
-            logger.info(f"Product price is lower than the last time ({old_price}).", extra={'product': product_json})
-            notify(product, "Price Drop !")
-        elif product.price > old_price:
-            logger.info(f"Product price is higher than the last time ({old_price}).", extra={'product': product_json})
-            notify(product, "Price Raise !")
-        elif product.price == old_price:
-            logger.info("Product price didn't change. Not raising notification.'.", extra={'product': product_json})
+        if product.price != old_product.price or product.availability != old_product.availability:
+            logger.info(f"Product was updated.", extra={'product': product.toJSON(), 'old_product': old_product.toJSON()})
+            notify(product, old_product)
+        else:
+            logger.info("Product didn't change. Not raising notification.'.", extra={'product': product.toJSON()})
 
     cache[product_cache_name] = product
 
-def notify(product, header):
+
+def notify(product, old_product):
     logger.info("Sending notification to telegram.", extra={'product': product.toJSON()})
 
-    telegramBot.send_message(config['TelegramBot']['chat_id'], f"""\
-{header}
-{product.name}
+    if old_product is None:
+        telegramBot.send_message(config['TelegramBot']['chat_id'], f"""\
+[Novo] <b>{product.name}</b>
 € {product.price}
-{product.url}\
+{product.availability}
+&#128279; <a href="{product.url}">link</a>\
+""")
+    else:
+        telegramBot.send_message(config['TelegramBot']['chat_id'], f"""\
+[Atualização] <b>{product.name}</b>
+{f"<s>€ {old_product.price}</s> &#10145; € {product.price}" if product.price != old_product.price else f"€ {product.price}" }
+{f"<s>{old_product.availability}</s> &#10145; {product.availability}" if product.availability != old_product.availability else f"{product.availability}" }
+&#128279; <a href="{product.url}">link</a>\
 """)
 
     logger.info("Notification sent.", extra={'product': product.toJSON()})
@@ -84,9 +90,9 @@ def get_product_from_server(url):
     soup = BeautifulSoup(content, features="html.parser")
     prod_name = soup.find('h1', class_='iss-product-name').text.strip()
     prod_price = soup.find('span', class_='iss-product-current-price')['content']
+    prod_unavailability = soup.find('div', class_='w-product__unavailability-title')
     
-    return Product(prod_name, float(prod_price.replace(",", ".")), url)
-
+    return Product(prod_name, float(prod_price.replace(",", ".")), url, "Disponível" if prod_unavailability is None else "Indisponível")
     
 config = helpers.read_config()
 logger = logging_utils.create_default_logger(__name__)
@@ -95,7 +101,7 @@ root = os.path.abspath(os.path.dirname(__file__))
 logger.info(f"Starting application on {root}")
 logger.info(f"Telegram notifications will be sent to chat group {config['TelegramBot']['chat_id']}")
 
-telegramBot = telebot.TeleBot(config['TelegramBot']['token'])
+telegramBot = telebot.TeleBot(config['TelegramBot']['token'], parse_mode='HTML')
 telebot.logger.handlers = []
 telebot.logger.setLevel(logging.INFO)
 telebot.logger.addHandler(logging_utils.logtail_handler)
