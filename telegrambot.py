@@ -10,7 +10,7 @@ config = helpers.read_config()
 
 logger = logging_utils.create_default_logger(__name__)
 
-bot = telebot.TeleBot(config['TelegramBot']['token'])
+bot = telebot.TeleBot(config['TelegramBot']['token'], parse_mode='HTML')
 telebot.logger.handlers = []
 telebot.logger.setLevel(logging.INFO)
 telebot.logger.addHandler(logging_utils.logtail_handler)
@@ -37,9 +37,14 @@ def handle_get_price_watches(message):
 
     try:
         file_path = os.path.abspath(os.path.dirname(__file__)) + "/urls.txt"
-        a_file = open(file_path)
-        file_content = a_file.read()
-        bot.reply_to(message, file_content)         
+        answer = ""
+
+        with open(file_path, "r") as f:
+            lines = f.readlines()
+            for line in lines:
+                answer += f"""&#8226; <a href="{line}">{line[line.rindex('/')+1:]}</a>"""
+
+        bot.reply_to(message, answer, disable_web_page_preview=True)         
     except Exception as e:
         logger.error(e)
 
